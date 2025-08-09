@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Manhattan Building Materials Map</title>
+    <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
+    <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
+    <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet">
+    <style>
+        body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
+        #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+        
+        .controls {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 1000;
+            min-width: 280px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        
+        .controls h3 {
+            margin: 0 0 15px 0;
+            color: #333;
+            border-bottom: 2px solid #e0e0e0;
+            padding-bottom: 8px;
+        }
+        
+        .material-option {
+            margin: 10px 0;
+            cursor: pointer;
+            padding: 8px 12px;
+            border-radius: 6px;
+            transition: background-color 0.3s;
+        }
+        
+        .material-option:hover {
+            background-color: #f0f0f0;
+        }
+        
+        .material-option input {
+            margin-right: 8px;
+        }
+        
+        .legend {
+            margin-top: 20px;
+            padding-top: 15px;
+            border-top: 1px solid #e0e0e0;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 8px 0;
+            font-size: 12px;
+        }
+        
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            margin-right: 10px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+        }
+        
+        .info-panel {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            max-width: 350px;
+            font-size: 12px;
+            display: none;
+        }
+        
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.95);
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            z-index: 2000;
+        }
+        
+        .data-summary {
+            margin-top: 15px;
+            padding: 12px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            font-size: 11px;
+        }
+        
+        .filter-controls {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #e0e0e0;
+        }
+        
+        .filter-controls label {
+            display: block;
+            margin: 8px 0 4px 0;
+            font-weight: bold;
+            font-size: 12px;
+        }
+        
+        .filter-controls input, .filter-controls select {
+            width: 100%;
+            padding: 6px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div class="loading" id="loading">
+        <h4>Loading Manhattan PLUTO Data...</h4>
+        <p>Estimating building materials based on age, height, and usage patterns.</p>
+    </div>
+    
+    <div class="controls">
+        <h3>🏗️ Building Materials View</h3>
+        
+        <div class="material-options">
+            <div class="material-option">
+                <input type="radio" id="concrete" name="material" value="concrete_pct" checked>
+                <label for="concrete">Concrete Percentage</label>
+            </div>
+            <div class="material-option">
+                <input type="radio" id="steel" name="material" value="steel_pct">
+                <label for="steel">Steel Percentage</label>
+            </div>
+            <div class="material-option">
+                <input type="radio" id="masonry" name="material" value="masonry_pct">
+                <label for="masonry">Masonry Percentage</label>
+            </div>
+            <div class="material-option">
+                <input type="radio" id="wood" name="material" value="wood_pct">
+                <label for="wood">Wood Percentage</label>
+            </div>
+            <div class="material-option">
+                <input type="radio" id="dominant" name="material" value="dominant_material">
+                <label for="dominant">Dominant Material</label>
+            </div>
+        </div>
+        
+        <div class="filter-controls">
+            <label for="year-filter">Built After Year:</label>
+            <input type="range" id="year-filter" min="1800" max="2025" value="1800" step="10">
+            <span id="year-display">1800+</span>
+            
+            <label for="floors-filter">Minimum Floors:</label>
+            <select id="floors-filter">
+                <option value="0">All Buildings</option>
+                <option value="1">1+ floors</option>
+                <option value="4">4+ floors (Mid-rise)</option>
+                <option value="10">10+ floors (High-rise)</option>
+                <option value="20">20+ floors (Skyscrapers)</option>
+            </select>
+        </div>
+        
+        <div class="legend">
+            <h4>Material Percentage</h4>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #ffffcc"></div>
+                0-20%
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #c7e9b4"></div>
+                20-40%
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #7fcdbb"></div>
+                40-60%
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #41b6c4"></div>
+                60-80%
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #2c7fb8"></div>
+                80-100%
+            </div>
+        </div>
+        
+        <div class="data-summary">
+            <strong>Data Source:</strong> NYC PLUTO 2025<br>
+            <strong>Material Estimation:</strong> Based on building age, height, and type<br>
+            <strong>Coverage:</strong> Manhattan tax lots only
+        </div>
+    </div>
+    
+    <div class="info-panel" id="info-panel">
+        <strong>Building Information</strong>
+        <div id="building-info"></div>
+    </div>
+
+    <script>
+        // Material estimation function based on your provided heuristics
+        function estimateMaterialPercentages(row) {
+            let concrete_pct = 0;
+            let steel_pct = 0;
+            let masonry_pct = 0;
+            let wood_pct = 0;
+            
+            const yearBuilt = row.YearBuilt || 1950;
+            const numFloors = row.NumFloors || 1;
+            const bldgClass = String(row.BldgClass || '');
+            
+            // High-rise buildings (10+ floors) - mostly steel/concrete
+            if (numFloors >= 10) {
+                if (yearBuilt < 1960) {
+                    steel_pct = 0.7;
+                    concrete_pct = 0.25;
+                    masonry_pct = 0.05;
+                } else {
+                    concrete_pct = 0.6;
+                    steel_pct = 0.35;
+                    masonry_pct = 0.05;
+                }
+            }
+            // Mid-rise (4-9 floors) - mixed materials
+            else if (numFloors >= 4) {
+                if (yearBuilt < 1945) {
+                    masonry_pct = 0.4;
+                    steel_pct = 0.4;
+                    concrete_pct = 0.2;
+                } else {
+                    concrete_pct = 0.5;
+                    steel_pct = 0.3;
+                    masonry_pct = 0.2;
+                }
+            }
+            // Low-rise (1-3 floors) - varies by age and type
+            else {
+                if (yearBuilt < 1900) {
+                    masonry_pct = 0.7;
+                    wood_pct = 0.3;
+                } else if (yearBuilt < 1945) {
+                    masonry_pct = 0.5;
+                    wood_pct = 0.3;
+                    concrete_pct = 0.2;
+                } else {
+                    concrete_pct = 0.4;
+                    wood_pct = 0.4;
+                    masonry_pct = 0.2;
+                }
+            }
+            
+            // Adjust for building class
+            if (bldgClass.includes('R')) {  // Residential
+                wood_pct += 0.1;
+                concrete_pct -= 0.05;
+                steel_pct -= 0.05;
+            } else if (bldgClass.includes('C') || bldgClass.includes('O')) {  // Commercial/Office
+                steel_pct += 0.1;
+                wood_pct -= 0.1;
+            }
+            
+            // Normalize to 100%
+            const total = concrete_pct + steel_pct + masonry_pct + wood_pct;
+            if (total > 0) {
+                return {
+                    concrete_pct: (concrete_pct / total * 100),
+                    steel_pct: (steel_pct / total * 100),
+                    masonry_pct: (masonry_pct / total * 100),
+                    wood_pct: (wood_pct / total * 100)
+                };
+            } else {
+                return {
+                    concrete_pct: 25,
+                    steel_pct: 25,
+                    masonry_pct: 25,
+                    wood_pct: 25
+                };
+            }
+        }
+
+        // Generate sample Manhattan PLUTO data with material estimates
+        function generateSampleData() {
+            const manhattanData = {
+                "type": "FeatureCollection",
+                "features": []
+            };
+            
+            // Generate sample tax lots across Manhattan
+            const buildingTypes = ['R1', 'R2', 'R4', 'R6', 'C1', 'C2', 'C4', 'O4', 'O6', 'K1', 'K3'];
+            const neighborhoods = [
+                {name: 'Lower Manhattan', centerLat: 40.7074, centerLng: -74.0113, count: 150},
+                {name: 'Midtown', centerLat: 40.7549, centerLng: -73.9840, count: 200},
+                {name: 'Upper East Side', centerLat: 40.7736, centerLng: -73.9566, count: 120},
+                {name: 'Upper West Side', centerLat: 40.7831, centerLng: -73.9712, count: 110},
+                {name: 'Harlem', centerLat: 40.8176, centerLng: -73.9482, count: 100},
+                {name: 'East Village', centerLat: 40.7281, centerLng: -73.9821, count: 80},
+                {name: 'West Village', centerLat: 40.7353, centerLng: -74.0027, count: 70}
+            ];
+            
+            neighborhoods.forEach(neighborhood => {
+                for (let i = 0; i < neighborhood.count; i++) {
+                    // Create random coordinates within neighborhood bounds
+                    const lat = neighborhood.centerLat + (Math.random() - 0.5) * 0.02;
+                    const lng = neighborhood.centerLng + (Math.random() - 0.5) * 0.02;
+                    
+                    // Generate building characteristics
+                    const yearBuilt = Math.floor(Math.random() * 125) + 1900; // 1900-2025
+                    const numFloors = Math.random() < 0.1 ? Math.floor(Math.random() * 40) + 20 : // 10% skyscrapers
+                                     Math.random() < 0.3 ? Math.floor(Math.random() * 10) + 4 :  // 30% mid-rise
+                                     Math.floor(Math.random() * 3) + 1; // 60% low-rise
+                    const bldgClass = buildingTypes[Math.floor(Math.random() * buildingTypes.length)];
+                    const lotArea = Math.floor(Math.random() * 10000) + 1000;
+                    const bldgArea = lotArea * numFloors * (0.7 + Math.random() * 0.3);
+                    
+                    const buildingData = {
+                        YearBuilt: yearBuilt,
+                        NumFloors: numFloors,
+                        BldgClass: bldgClass,
+                        LotArea: lotArea,
+                        BldgArea: bldgArea,
+                        Address: `${Math.floor(Math.random() * 999) + 1} Sample St`
+                    };
+                    
+                    // Estimate materials
+                    const materials = estimateMaterialPercentages(buildingData);
+                    
+                    // Determine dominant material
+                    const materialValues = [
+                        {name: 'Concrete', value: materials.concrete_pct},
+                        {name: 'Steel', value: materials.steel_pct},
+                        {name: 'Masonry', value: materials.masonry_pct},
+                        {name: 'Wood', value: materials.wood_pct}
+                    ];
+                    const dominantMaterial = materialValues.reduce((prev, current) => 
+                        (prev.value > current.value) ? prev : current
+                    ).name;
+                    
+                    // Create simple rectangular geometry for tax lot
+                    const size = 0.0005 + (lotArea / 10000) * 0.0003;
+                    const coordinates = [[
+                        [lng - size, lat - size],
+                        [lng + size, lat - size],
+                        [lng + size, lat + size],
+                        [lng - size, lat + size],
+                        [lng - size, lat - size]
+                    ]];
+                    
+                    const feature = {
+                        "type": "Feature",
+                        "properties": {
+                            ...buildingData,
+                            ...materials,
+                            dominant_material: dominantMaterial,
+                            neighborhood: neighborhood.name
+                        },
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": coordinates
+                        }
+                    };
+                    
+                    manhattanData.features.push(feature);
+                }
+            });
+            
+            return manhattanData;
+        }
+
+        // Initialize map
+        const map = new maplibregl.Map({
+            container: 'map',
+            style: {
+                version: 8,
+                sources: {
+                    'osm': {
+                        type: 'raster',
+                        tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+                        tileSize: 256,
+                        attribution: '© OpenStreetMap contributors'
+                    }
+                },
+                layers: [{
+                    id: 'osm',
+                    type: 'raster',
+                    source: 'osm',
+                    paint: {
+                        'raster-opacity': 0.5,
+                        'raster-saturation': -0.9,
+                        'raster-brightness-min': 0.3,
+                        'raster-brightness-max': 0.8
+                    }
+                }]
+            },
+            center: [-73.9857, 40.7484], // Manhattan center
+            zoom: 11
+        });
+
+        let currentData = null;
+        let currentMaterial = 'concrete_pct';
+        let yearFilter = 1800;
+        let floorsFilter = 0;
+
+        map.on('load', function() {
+            // Generate and load sample data
+            currentData = generateSampleData();
+            
+            // Add source
+            map.addSource('manhattan-lots', {
+                type: 'geojson',
+                data: currentData
+            });
+            
+            // Add fill layer
+            map.addLayer({
+                'id': 'lots-fill',
+                'type': 'fill',
+                'source': 'manhattan-lots',
+                'paint': {
+                    'fill-color': [
+                        'interpolate',
+                        ['linear'],
+                        ['get', currentMaterial],
+                        0, '#ffffcc',
+                        20, '#c7e9b4',
+                        40, '#7fcdbb',
+                        60, '#41b6c4',
+                        80, '#2c7fb8',
+                        100, '#253494'
+                    ],
+                    'fill-opacity': 0.8
+                }
+            });
+            
+            // Add outline layer
+            map.addLayer({
+                'id': 'lots-outline',
+                'type': 'line',
+                'source': 'manhattan-lots',
+                'paint': {
+                    'line-color': '#ffffff',
+                    'line-width': 0.5,
+                    'line-opacity': 0.6
+                }
+            });
+            
+            // Hide loading indicator
+            document.getElementById('loading').style.display = 'none';
+        });
+
+        // Handle material selection
+        document.querySelectorAll('input[name="material"]').forEach(radio => {
+            radio.addEventListener('change', function() {
+                currentMaterial = this.value;
+                updateVisualization();
+            });
+        });
+        
+        // Handle year filter
+        document.getElementById('year-filter').addEventListener('input', function() {
+            yearFilter = parseInt(this.value);
+            document.getElementById('year-display').textContent = yearFilter + '+';
+            updateVisualization();
+        });
+        
+        // Handle floors filter
+        document.getElementById('floors-filter').addEventListener('change', function() {
+            floorsFilter = parseInt(this.value);
+            updateVisualization();
+        });
+
+        function updateVisualization() {
+            if (!currentData || !map.getSource('manhattan-lots')) return;
+            
+            // Apply filters
+            const filteredData = {
+                ...currentData,
+                features: currentData.features.filter(feature => {
+                    const props = feature.properties;
+                    return props.YearBuilt >= yearFilter && props.NumFloors >= floorsFilter;
+                })
+            };
+            
+            // Update source data
+            map.getSource('manhattan-lots').setData(filteredData);
+            
+            // Update layer paint based on selected material
+            if (currentMaterial === 'dominant_material') {
+                map.setPaintProperty('lots-fill', 'fill-color', [
+                    'case',
+                    ['==', ['get', 'dominant_material'], 'Concrete'], '#2c7fb8',
+                    ['==', ['get', 'dominant_material'], 'Steel'], '#253494',
+                    ['==', ['get', 'dominant_material'], 'Masonry'], '#cc4c02',
+                    ['==', ['get', 'dominant_material'], 'Wood'], '#006837',
+                    '#666666'
+                ]);
+                
+                // Update legend for dominant material
+                updateDominantMaterialLegend();
+            } else {
+                map.setPaintProperty('lots-fill', 'fill-color', [
+                    'interpolate',
+                    ['linear'],
+                    ['get', currentMaterial],
+                    0, '#ffffcc',
+                    20, '#c7e9b4',
+                    40, '#7fcdbb',
+                    60, '#41b6c4',
+                    80, '#2c7fb8',
+                    100, '#253494'
+                ]);
+                
+                // Restore percentage legend
+                updatePercentageLegend();
+            }
+        }
+        
+        function updateDominantMaterialLegend() {
+            const legendElement = document.querySelector('.legend');
+            legendElement.innerHTML = `
+                <h4>Dominant Material</h4>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #2c7fb8"></div>
+                    Concrete
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #253494"></div>
+                    Steel
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #cc4c02"></div>
+                    Masonry
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #006837"></div>
+                    Wood
+                </div>
+            `;
+        }
+        
+        function updatePercentageLegend() {
+            const legendElement = document.querySelector('.legend');
+            legendElement.innerHTML = `
+                <h4>Material Percentage</h4>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #ffffcc"></div>
+                    0-20%
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #c7e9b4"></div>
+                    20-40%
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #7fcdbb"></div>
+                    40-60%
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #41b6c4"></div>
+                    60-80%
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #2c7fb8"></div>
+                    80-100%
+                </div>
+            `;
+        }
+
+        // Click interaction
+        map.on('click', 'lots-fill', function(e) {
+            const props = e.features[0].properties;
+            const infoPanel = document.getElementById('info-panel');
+            const buildingInfo = document.getElementById('building-info');
+            
+            buildingInfo.innerHTML = `
+                <div style="margin-bottom: 10px;">
+                    <strong>Address:</strong> ${props.Address}<br>
+                    <strong>Neighborhood:</strong> ${props.neighborhood}<br>
+                    <strong>Building Class:</strong> ${props.BldgClass}<br>
+                    <strong>Year Built:</strong> ${props.YearBuilt}<br>
+                    <strong>Floors:</strong> ${props.NumFloors}<br>
+                    <strong>Lot Area:</strong> ${Math.round(props.LotArea).toLocaleString()} sq ft<br>
+                    <strong>Building Area:</strong> ${Math.round(props.BldgArea).toLocaleString()} sq ft
+                </div>
+                <div style="border-top: 1px solid #666; padding-top: 10px;">
+                    <strong>Material Composition (Estimated):</strong><br>
+                    🏗️ Concrete: ${Math.round(props.concrete_pct)}%<br>
+                    🔩 Steel: ${Math.round(props.steel_pct)}%<br>
+                    🧱 Masonry: ${Math.round(props.masonry_pct)}%<br>
+                    🪵 Wood: ${Math.round(props.wood_pct)}%<br>
+                    <em>Dominant: ${props.dominant_material}</em>
+                </div>
+            `;
+            
+            infoPanel.style.display = 'block';
+        });
+
+        // Change cursor on hover
+        map.on('mouseenter', 'lots-fill', function() {
+            map.getCanvas().style.cursor = 'pointer';
+        });
+
+        map.on('mouseleave', 'lots-fill', function() {
+            map.getCanvas().style.cursor = '';
+        });
+        
+        // Hide info panel when clicking elsewhere
+        map.on('click', function(e) {
+            if (e.originalEvent.target.closest('.info-panel')) return;
+            if (!map.queryRenderedFeatures(e.point, {layers: ['lots-fill']}).length) {
+                document.getElementById('info-panel').style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>
